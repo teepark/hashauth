@@ -7,34 +7,91 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"hash"
+	"net/http"
+	"strings"
+	"time"
 )
 
 const padChar = '.'
 
-// ErrInvalid is returned from Decode when a token proves to be invalid.
+// ErrInvalid is returned when an authentication check fails
 var ErrInvalid = errors.New("token validation failed")
 
-var defaultHasher = sha1.New
+var (
+	defaultHasher     = sha1.New
+	defaultCookieName = "_sess"
+	defaultCookiePath = "/"
+)
+
+// Options is a simple container for various HashAuth options.
+type Options struct {
+	Hash           func() hash.Hash
+	CookieName     string
+	CookiePath     string
+	CookieDomain   string
+	CookieSecure   bool
+	CookieHTTPOnly bool
+}
+
+// HashAuth is an Encoder and Decoder of tokens.
+type HashAuth struct {
+	key            []byte
+	hasher         func() hash.Hash
+	cookieName     string
+	cookiePath     string
+	cookieDomain   string
+	cookieSecure   bool
+	cookieHTTPOnly bool
+}
+
+// Expirer can be implemented by session data types, in which case their
+// expiration time will be set as the cookie expiration time in
+// HashAuth.SetCookie.
+type Expirer interface {
+	Expires() time.Time
+}
+
+// MaxAger can be implemented by session data types, in which case the
+// HashAuth.SetCookie method will set a max-age attribute (unless it
+// also implements Expirer, which takes precedence).
+type MaxAger interface {
+	MaxAge() time.Duration
+}
 
 // New creates a new HashAuth En/Decoder.
 // key should be a carefully guarded secret, with it anyone could forge a token.
 // opts can be nil, in which case a sha1 hasher will be used.
-func New(key []byte, hasher func() hash.Hash) *HashAuth {
+func New(key []byte, opts *Options) *HashAuth {
+	if opts == nil {
+		opts = &Options{}
+	}
+
+	hasher := opts.Hash
 	if hasher == nil {
 		hasher = defaultHasher
 	}
 
-	return &HashAuth{
-		key:    key,
-		hasher: hasher,
+	cname := opts.CookieName
+	if cname == "" {
+		cname = defaultCookieName
 	}
-}
 
-// An Encoder and Decoder of tokens.
-type HashAuth struct {
-	key    []byte
-	hasher func() hash.Hash
+	cpath := opts.CookiePath
+	if cpath == "" {
+		cpath = defaultCookiePath
+	}
+
+	return &HashAuth{
+		key:            key,
+		hasher:         hasher,
+		cookieName:     cname,
+		cookiePath:     cpath,
+		cookieDomain:   opts.CookieDomain,
+		cookieSecure:   opts.CookieSecure,
+		cookieHTTPOnly: opts.CookieHTTPOnly,
+	}
 }
 
 // Encode produces a signed token with session data.
@@ -68,10 +125,10 @@ func (ha *HashAuth) Validate(token []byte) bool {
 }
 
 func (ha *HashAuth) validate(token []byte) bool {
-	hash_size := ha.hasher().Size()
+	hashSize := ha.hasher().Size()
 
 	length := len(token)
-	if length < hash_size+1 {
+	if length < hashSize+1 {
 		return false
 	}
 
@@ -102,6 +159,93 @@ func (ha *HashAuth) Decode(token []byte, container interface{}) error {
 
 	buf := bytes.NewBuffer(token)
 	return gob.NewDecoder(buf).Decode(container)
+}
+
+// Authenticate finds and decodes the auth token from a request, populating
+// the container with the session data.
+// It will return nil on success, or:
+//  - http.ErrNoCookie if there is no auth header at all
+//  - a base64 or gob decoding error if it is malformed
+//  - ErrInvalid if there is a properly formatted token that is invalid
+func (ha *HashAuth) Authenticate(r *http.Request, container interface{}) error {
+	cookie, err := r.Cookie(ha.cookieName)
+	if err != nil {
+		return err
+	}
+	return ha.Decode([]byte(cookie.Value), container)
+}
+
+// SetCookie adds an encoded token as a cookie on an HTTP response.
+// If the provided session data object implements the Expirer or MaxAger
+// interfaces, then the corresponding cookie attribute will also be set.
+// Other cookie attributes will be set according to the *Options with
+// which the HashAuth was created.
+func (ha *HashAuth) SetCookie(w http.ResponseWriter, session interface{}) error {
+	token, err := ha.Encode(session)
+	if err != nil {
+		return err
+	}
+
+	cookie := &http.Cookie{
+		Name:     ha.cookieName,
+		Value:    string(token),
+		Path:     ha.cookiePath,
+		Domain:   ha.cookieDomain,
+		Secure:   ha.cookieSecure,
+		HttpOnly: ha.cookieHTTPOnly,
+	}
+	augmentCookie(cookie, session)
+	w.Header().Add("Set-Cookie", fmtCookie(cookie))
+	return nil
+}
+
+// ClearCookie adds a Set-Cookie header to a response that will remove
+// the auth cookie.
+func (ha *HashAuth) ClearCookie(w http.ResponseWriter) {
+	w.Header().Add("Set-Cookie", fmtCookie(&http.Cookie{
+		Name:     ha.cookieName,
+		Value:    "",
+		Path:     ha.cookiePath,
+		Domain:   ha.cookieDomain,
+		Secure:   ha.cookieSecure,
+		HttpOnly: ha.cookieHTTPOnly,
+		MaxAge:   -1,
+	}))
+}
+
+func augmentCookie(cookie *http.Cookie, session interface{}) {
+	var (
+		expire time.Time
+		maxage time.Duration
+	)
+
+	if sess, ok := session.(Expirer); ok {
+		expire = sess.Expires().UTC()
+	}
+	if !expire.IsZero() {
+		//TODO: find out exactly: for which browsers is this necessary?
+		s := expire.Format(time.RFC1123)
+		if strings.HasSuffix(s, "UTC") {
+			s = s[:len(s)-3] + "GMT"
+		}
+		cookie.RawExpires = s
+		return
+	}
+
+	if sess, ok := session.(MaxAger); ok {
+		maxage = sess.MaxAge()
+	}
+	if maxage != 0 {
+		cookie.MaxAge = int(maxage / time.Second)
+	}
+}
+
+func fmtCookie(cookie *http.Cookie) string {
+	cookie.Expires = time.Time{}
+	if len(cookie.RawExpires) > 0 {
+		return fmt.Sprintf("%s; Expires=%s", cookie.String(), cookie.RawExpires)
+	}
+	return cookie.String()
 }
 
 func b64encode(plain []byte) []byte {
