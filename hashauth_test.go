@@ -365,7 +365,7 @@ func TestSetsCustomCookieName(t *testing.T) {
 	}
 }
 
-func TestSetsDefaultCookiePath(t *testing.T) {
+func TestNoDefaultCookiePath(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 
 	w := httptest.NewRecorder()
@@ -377,15 +377,8 @@ func TestSetsDefaultCookiePath(t *testing.T) {
 	}
 
 	path := getCookieAttr(cookies[0], "path")
-	if path == "" {
-		t.Fatalf("SetCookie didn't set a path? ('%s')", cookies[0])
-	}
-	if path != defaultCookiePath {
-		t.Fatalf(
-			"SetCookie set the wrong path (expected '%s', got '%s')",
-			defaultCookiePath,
-			path,
-		)
+	if path != "" {
+		t.Fatalf("SetCookie set a path without being provided one? ('%s')", path)
 	}
 }
 

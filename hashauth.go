@@ -21,8 +21,7 @@ var ErrInvalid = errors.New("token validation failed")
 
 var (
 	defaultHasher     = sha1.New
-	defaultCookieName = "_sess"
-	defaultCookiePath = "/"
+	defaultCookieName = "_ha"
 )
 
 // Options is a simple container for various HashAuth options.
@@ -62,7 +61,8 @@ type MaxAger interface {
 
 // New creates a new HashAuth En/Decoder.
 // key should be a carefully guarded secret, with it anyone could forge a token.
-// opts can be nil, in which case a sha1 hasher will be used.
+// opts can be nil, in which case a sha1 hasher, a default cookie name, and no
+// cookie attributes will be used.
 func New(key []byte, opts *Options) *HashAuth {
 	if opts == nil {
 		opts = &Options{}
@@ -78,16 +78,11 @@ func New(key []byte, opts *Options) *HashAuth {
 		cname = defaultCookieName
 	}
 
-	cpath := opts.CookiePath
-	if cpath == "" {
-		cpath = defaultCookiePath
-	}
-
 	return &HashAuth{
 		key:            key,
 		hasher:         hasher,
 		cookieName:     cname,
-		cookiePath:     cpath,
+		cookiePath:     opts.CookiePath,
 		cookieDomain:   opts.CookieDomain,
 		cookieSecure:   opts.CookieSecure,
 		cookieHTTPOnly: opts.CookieHTTPOnly,
