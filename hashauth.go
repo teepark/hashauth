@@ -1,3 +1,58 @@
+/*
+Package hashauth provides a means of creating a cookie- and url-friendly token
+containing arbitrary encoded information, with an embedded authentication code
+that ensures that it was created by you (not forged) and is in its original
+form  (not tampered with).
+
+Primary use-cases are login sessions, password reset tokens, and the like. Any
+situation where you need to provide to the user a token they can present back
+to you which contains a small amount of data and authentication guarantees.
+
+The package provides methods for Encoding, Validating, and Decoding tokens,
+and also a higher-level API for interacting with HTTP request and response
+cookies for sessions.
+
+Login session example:
+
+	var Signer = hashauth.New([]byte("secret key"), nil)
+	const loginCtx = "login"
+
+	type LoginSession struct {
+		UserID     int
+		Expiration time.Time
+	}
+
+	// implementing this method causes hashauth to set the Expires cookie attr
+	func (sess *LoginSession) Expires() time.Time {
+		return sess.Expiration
+	}
+
+	func AuthRequired(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sess := new(LoginSession)
+			err := Signer.Authenticate(loginCtx, r, sess)
+			if err != nil {
+				http.Error(w, "Login Required", http.StatusForbidden)
+			} else if time.Now().UTC().Before(sess.Expiration) {
+				// check the expiration, cookie attributes can be tampered with
+				http.Error(w, "Login Expired", http.StatusForbidden)
+			} else {
+				h.ServeHTTP(w, r)
+			}
+		})
+	}
+
+	func LogUserIn(uid int, w http.ResponseWriter) error {
+		return Signer.SetCookie(loginCtx, w, &LoginSession{
+			UserID:     uid,
+			Expiration: time.Now().UTC().Add(7*24*time.Hour),
+		})
+	}
+
+	func LogUserOut(w http.ResponseWriter) {
+		Signer.ClearCookie(w)
+	}
+*/
 package hashauth
 
 import (
