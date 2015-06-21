@@ -95,7 +95,7 @@ func New(key []byte, opts *Options) *HashAuth {
 }
 
 // Encode produces a signed token with session data.
-func (ha *HashAuth) Encode(session interface{}) ([]byte, error) {
+func (ha *HashAuth) Encode(context string, session interface{}) ([]byte, error) {
 	buf := &bytes.Buffer{}
 
 	err := gob.NewEncoder(buf).Encode(session)
@@ -103,7 +103,7 @@ func (ha *HashAuth) Encode(session interface{}) ([]byte, error) {
 		return nil, err
 	}
 
-	hasher := hmac.New(ha.hasher, ha.key)
+	hasher := hmac.New(ha.hasher, append(ha.key, []byte(context)...))
 	hasher.Write(buf.Bytes())
 	mac := hasher.Sum(nil)
 
@@ -116,15 +116,15 @@ func (ha *HashAuth) Encode(session interface{}) ([]byte, error) {
 }
 
 // Validate tests a token's signature and returns whether it it valid.
-func (ha *HashAuth) Validate(token []byte) bool {
+func (ha *HashAuth) Validate(context string, token []byte) bool {
 	token, err := b64decode(token)
 	if err != nil {
 		return false
 	}
-	return ha.validate(token)
+	return ha.validate(context, token)
 }
 
-func (ha *HashAuth) validate(token []byte) bool {
+func (ha *HashAuth) validate(context string, token []byte) bool {
 	hashSize := ha.hasher().Size()
 
 	length := len(token)
@@ -132,7 +132,7 @@ func (ha *HashAuth) validate(token []byte) bool {
 		return false
 	}
 
-	hasher := hmac.New(ha.hasher, ha.key)
+	hasher := hmac.New(ha.hasher, append(ha.key, []byte(context)...))
 	hasher.Write(token[:length-hasher.Size()])
 
 	mac1 := token[length-hasher.Size():]
@@ -147,13 +147,13 @@ func (ha *HashAuth) validate(token []byte) bool {
 
 // Decode checks a token's validity and extracts the data encoded in it.
 // May return ErrInvalid if the validity check fails.
-func (ha *HashAuth) Decode(token []byte, container interface{}) error {
+func (ha *HashAuth) Decode(context string, token []byte, container interface{}) error {
 	token, err := b64decode(token)
 	if err != nil {
 		return err
 	}
 
-	if !ha.validate(token) {
+	if !ha.validate(context, token) {
 		return ErrInvalid
 	}
 
@@ -167,12 +167,12 @@ func (ha *HashAuth) Decode(token []byte, container interface{}) error {
 //  - http.ErrNoCookie if there is no auth header at all
 //  - a base64 or gob decoding error if it is malformed
 //  - ErrInvalid if there is a properly formatted token that is invalid
-func (ha *HashAuth) Authenticate(r *http.Request, container interface{}) error {
+func (ha *HashAuth) Authenticate(context string, r *http.Request, container interface{}) error {
 	cookie, err := r.Cookie(ha.cookieName)
 	if err != nil {
 		return err
 	}
-	return ha.Decode([]byte(cookie.Value), container)
+	return ha.Decode(context, []byte(cookie.Value), container)
 }
 
 // SetCookie adds an encoded token as a cookie on an HTTP response.
@@ -180,8 +180,8 @@ func (ha *HashAuth) Authenticate(r *http.Request, container interface{}) error {
 // interfaces, then the corresponding cookie attribute will also be set.
 // Other cookie attributes will be set according to the *Options with
 // which the HashAuth was created.
-func (ha *HashAuth) SetCookie(w http.ResponseWriter, session interface{}) error {
-	token, err := ha.Encode(session)
+func (ha *HashAuth) SetCookie(context string, w http.ResponseWriter, session interface{}) error {
+	token, err := ha.Encode(context, session)
 	if err != nil {
 		return err
 	}

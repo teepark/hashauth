@@ -28,15 +28,12 @@ func TestTokenValidates(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		token, err := ha.Encode(&sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		token, err := ha.Encode("login", newSess())
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
 
-		if !ha.Validate(token) {
+		if !ha.Validate("login", token) {
 			t.Fatalf("[%s] Encode-produced token doesn't Validate!", opt.name)
 		}
 	}
@@ -46,10 +43,7 @@ func TestTamperedTokenDoesntValidate(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		token, err := ha.Encode(&sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		token, err := ha.Encode("login", newSess())
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
@@ -59,7 +53,7 @@ func TestTamperedTokenDoesntValidate(t *testing.T) {
 		for i := 0; i < len(token)-4; i++ {
 			token[i]++
 
-			if ha.Validate(token) {
+			if ha.Validate("login", token) {
 				t.Fatalf("[%s] tampered-with token still validates! (%d)", opt.name, i)
 			}
 
@@ -72,10 +66,7 @@ func TestTamperedTokenDoesntDecode(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		token, err := ha.Encode(&sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		token, err := ha.Encode("login", newSess())
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
@@ -83,7 +74,7 @@ func TestTamperedTokenDoesntDecode(t *testing.T) {
 		for i := 0; i < len(token)-4; i++ {
 			token[i]++
 
-			if err := ha.Decode(token, &sessionType{}); err == nil {
+			if err := ha.Decode("login", token, &sessionType{}); err == nil {
 				t.Fatalf("[%s] tampered-with token still decodes! (%d)", opt.name, i)
 			}
 
@@ -96,17 +87,29 @@ func TestDifferentSignKeyDoesntValidate(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		token, err := ha.Encode(&sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		token, err := ha.Encode("login", newSess())
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
 
 		ha = New([]byte("some other sign key"), nil)
-		if ha.Validate(token) {
+		if ha.Validate("login", token) {
 			t.Fatalf("[%s] token validates with wrong sign key!", opt.name)
+		}
+	}
+}
+
+func TestDifferentContextDoesntValidate(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		token, err := ha.Encode("login1", newSess())
+		if err != nil {
+			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
+		}
+
+		if ha.Validate("login2", token) {
+			t.Fatalf("[%s] token validates with wrong context!", opt.name)
 		}
 	}
 }
@@ -116,10 +119,7 @@ func TestEncodesWithAnyHash(t *testing.T) {
 		Hash: sha1.New,
 	})
 
-	sha1Token, err := sha1Ha.Encode(&sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	sha1Token, err := sha1Ha.Encode("login", newSess())
 	if err != nil {
 		t.Fatalf("Encode failed (%s)", err)
 	}
@@ -128,10 +128,7 @@ func TestEncodesWithAnyHash(t *testing.T) {
 		Hash: sha256.New,
 	})
 
-	sha256Token, err := sha256Ha.Encode(&sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	sha256Token, err := sha256Ha.Encode("login", newSess())
 	if err != nil {
 		t.Fatalf("Encode failed (%s)", err)
 	}
@@ -151,23 +148,20 @@ func TestRoundTrip(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		start := &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		}
+		start := newSess()
 
 		var (
 			token []byte
 			err   error
 		)
 
-		token, err = ha.Encode(start)
+		token, err = ha.Encode("login", start)
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
 
 		end := new(sessionType)
-		if err := ha.Decode(token, end); err != nil {
+		if err := ha.Decode("login", token, end); err != nil {
 			t.Fatalf("[%s] Encode-produced token doesn't Decode! (%s)", opt.name, err)
 		}
 
@@ -188,17 +182,14 @@ func TestProducesURLSafeTokens(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		start := &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		}
+		start := newSess()
 
 		var (
 			token []byte
 			err   error
 		)
 
-		token, err = ha.Encode(start)
+		token, err = ha.Encode("login", start)
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
@@ -219,23 +210,20 @@ func TestSetsCookie(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		sess := &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		}
+		sess := newSess()
 
 		var (
 			token []byte
 			err   error
 		)
 
-		token, err = ha.Encode(sess)
+		token, err = ha.Encode("login", sess)
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
 
 		w := httptest.NewRecorder()
-		if err := ha.SetCookie(w, sess); err != nil {
+		if err := ha.SetCookie("login", w, sess); err != nil {
 			t.Fatalf("[%s] SetCookie failed (%s)", opt.name, err)
 		}
 
@@ -273,17 +261,14 @@ func TestAuthenticates(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		start := &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		}
+		start := newSess()
 
 		var (
 			token []byte
 			err   error
 		)
 
-		token, err = ha.Encode(start)
+		token, err = ha.Encode("login", start)
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
@@ -295,7 +280,7 @@ func TestAuthenticates(t *testing.T) {
 		req.Header.Add("Cookie", ha.cookieName+"="+string(token))
 
 		session := new(sessionType)
-		err = ha.Authenticate(req, session)
+		err = ha.Authenticate("login", req, session)
 		if err != nil {
 			t.Fatalf("[%s] Authenticate failed (%s)", opt.name, err)
 		}
@@ -315,10 +300,7 @@ func TestTamperingPreventsAuth(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
 
-		token, err := ha.Encode(&sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		token, err := ha.Encode("login", newSess())
 		if err != nil {
 			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
 		}
@@ -332,7 +314,7 @@ func TestTamperingPreventsAuth(t *testing.T) {
 			token[i]++
 			req.Header.Add("Cookie", ha.cookieName+"="+string(token))
 
-			if err := ha.Authenticate(req, &sessionType{}); err == nil {
+			if err := ha.Authenticate("login", req, &sessionType{}); err == nil {
 				t.Fatalf("[%s] tampered-with token still auths! (%d)", opt.name, i)
 			}
 
@@ -346,10 +328,7 @@ func TestSetsDefaultCookieName(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -369,10 +348,7 @@ func TestSetsDefaultCookieName(t *testing.T) {
 func TestSetsCustomCookieName(t *testing.T) {
 	ha := New([]byte(signKey), &Options{CookieName: "othername"})
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -393,10 +369,7 @@ func TestSetsDefaultCookiePath(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -421,10 +394,7 @@ func TestSetsCustomCookiePath(t *testing.T) {
 	ha := New([]byte(signKey), &Options{CookiePath: customPath})
 
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -447,10 +417,7 @@ func TestSetsCustomCookiePath(t *testing.T) {
 func TestNoDefaultCookieDomain(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -467,10 +434,7 @@ func TestCustomCookieDomain(t *testing.T) {
 	customDomain := "custom.doma.in"
 	ha := New([]byte(signKey), &Options{CookieDomain: customDomain})
 	w := httptest.NewRecorder()
-	ha.SetCookie(w, &sessionType{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
+	ha.SetCookie("login", w, newSess())
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -495,10 +459,7 @@ func TestCookieSecureBool(t *testing.T) {
 	} {
 		ha := New([]byte(signKey), opt)
 		w := httptest.NewRecorder()
-		ha.SetCookie(w, &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		ha.SetCookie("login", w, newSess())
 
 		cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 		if len(cookies) != 1 {
@@ -524,10 +485,7 @@ func TestCookieHTTPOnlyBool(t *testing.T) {
 	} {
 		ha := New([]byte(signKey), opt)
 		w := httptest.NewRecorder()
-		ha.SetCookie(w, &sessionType{
-			UserID:     56,
-			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-		})
+		ha.SetCookie("login", w, newSess())
 
 		cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 		if len(cookies) != 1 {
@@ -548,11 +506,8 @@ func TestCookieHTTPOnlyBool(t *testing.T) {
 func TestCookieExpires(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 	w := httptest.NewRecorder()
-	sess := &expiringSession{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	}
-	ha.SetCookie(w, sess)
+	sess := (*expiringSession)(newSess())
+	ha.SetCookie("login", w, sess)
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -573,11 +528,8 @@ func TestCookieExpires(t *testing.T) {
 func TestCookieMaxAge(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 	w := httptest.NewRecorder()
-	sess := &maxAgeSession{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	}
-	ha.SetCookie(w, sess)
+	sess := (*maxAgeSession)(newSess())
+	ha.SetCookie("login", w, sess)
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -598,11 +550,8 @@ func TestCookieMaxAge(t *testing.T) {
 func TestExpiresTakesPrecedence(t *testing.T) {
 	ha := New([]byte(signKey), nil)
 	w := httptest.NewRecorder()
-	sess := &flexibleSession{
-		UserID:     56,
-		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
-	}
-	ha.SetCookie(w, sess)
+	sess := (*flexibleSession)(newSess())
+	ha.SetCookie("login", w, sess)
 
 	cookies := (map[string][]string)(w.Header())["Set-Cookie"]
 	if len(cookies) != 1 {
@@ -663,6 +612,13 @@ func equal(a, b *sessionType) bool {
 type optionsList []struct {
 	name string
 	opts *Options
+}
+
+func newSess() *sessionType {
+	return &sessionType{
+		UserID:     56,
+		Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
+	}
 }
 
 func cookieVal(fullHeader string) []byte {
