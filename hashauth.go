@@ -63,7 +63,10 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,7 +153,7 @@ func New(key []byte, opts *Options) *HashAuth {
 func (ha *HashAuth) Encode(context string, session interface{}) ([]byte, error) {
 	buf := &bytes.Buffer{}
 
-	err := codec.NewEncoder(buf, &mh).Encode(session)
+	err := encodeKeyless(buf, session)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +213,7 @@ func (ha *HashAuth) Decode(context string, token []byte, container interface{}) 
 	}
 
 	buf := bytes.NewBuffer(token)
-	return codec.NewDecoder(buf, &mh).Decode(container)
+	return decodeKeyless(container, buf)
 }
 
 // Authenticate finds and decodes the auth token from a request, populating
@@ -317,4 +320,74 @@ func b64decode(enc []byte) ([]byte, error) {
 	}
 
 	return plain[:n], nil
+}
+
+func deref(val reflect.Value) reflect.Value {
+	kind := val.Kind()
+	for kind == reflect.Ptr || kind == reflect.Interface {
+		val = val.Elem()
+		kind = val.Kind()
+	}
+	return val
+}
+
+func getKeys(t reflect.Type) []string {
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	num := t.NumField()
+	keys := make([]string, num)
+	j := 0
+	for i := 0; i < num; i++ {
+		key := t.Field(i).Name
+		if key[0:1] != strings.ToUpper(key[0:1]) {
+			continue
+		}
+		keys[j] = key
+		j++
+	}
+	keys = keys[:j]
+
+	sort.Strings(keys)
+	return keys
+}
+
+func encodeKeyless(w io.Writer, obj interface{}) error {
+	enc := codec.NewEncoder(w, &mh)
+	val := deref(reflect.ValueOf(obj))
+
+	keys := getKeys(val.Type())
+	if keys == nil {
+		return enc.Encode(obj)
+	}
+
+	for _, key := range keys {
+		err := enc.Encode(val.FieldByName(key).Interface())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func decodeKeyless(dest interface{}, r io.Reader) error {
+	dec := codec.NewDecoder(r, &mh)
+	val := deref(reflect.ValueOf(dest))
+
+	keys := getKeys(val.Type())
+	if keys == nil {
+		return dec.Decode(dest)
+	}
+
+	for _, key := range keys {
+		dest = val.FieldByName(key).Addr().Interface()
+		err := dec.Decode(&dest)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
