@@ -42,7 +42,7 @@ Login session example:
 		})
 	}
 
-	func LogUserIn(uid int, w http.ResponseWriter) error {
+	func LogUserIn(w http.ResponseWriter, uid int) error {
 		return Signer.SetCookie(loginCtx, w, &LoginSession{
 			UserID:     uid,
 			Expiration: time.Now().UTC().Add(7*24*time.Hour),
@@ -60,13 +60,14 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"hash"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ugorji/go/codec"
 )
 
 const padChar = '.'
@@ -77,6 +78,7 @@ var ErrInvalid = errors.New("token validation failed")
 var (
 	defaultHasher     = sha1.New
 	defaultCookieName = "_ha"
+	mh                codec.MsgpackHandle
 )
 
 // Options is a simple container for various HashAuth options.
@@ -148,7 +150,7 @@ func New(key []byte, opts *Options) *HashAuth {
 func (ha *HashAuth) Encode(context string, session interface{}) ([]byte, error) {
 	buf := &bytes.Buffer{}
 
-	err := gob.NewEncoder(buf).Encode(session)
+	err := codec.NewEncoder(buf, &mh).Encode(session)
 	if err != nil {
 		return nil, err
 	}
@@ -208,14 +210,14 @@ func (ha *HashAuth) Decode(context string, token []byte, container interface{}) 
 	}
 
 	buf := bytes.NewBuffer(token)
-	return gob.NewDecoder(buf).Decode(container)
+	return codec.NewDecoder(buf, &mh).Decode(container)
 }
 
 // Authenticate finds and decodes the auth token from a request, populating
 // the container with the session data.
 // It will return nil on success, or:
 //  - http.ErrNoCookie if there is no auth header at all
-//  - a base64 or gob decoding error if it is malformed
+//  - a decoding error if it is malformed
 //  - ErrInvalid if there is a properly formatted token that is invalid
 func (ha *HashAuth) Authenticate(context string, r *http.Request, container interface{}) error {
 	cookie, err := r.Cookie(ha.cookieName)
