@@ -58,7 +58,7 @@ package hashauth
 import (
 	"bytes"
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -79,7 +79,7 @@ const padChar = '.'
 var ErrInvalid = errors.New("token validation failed")
 
 var (
-	defaultHasher     = sha1.New
+	defaultHasher     = sha256.New
 	defaultCookieName = "_ha"
 	mh                codec.MsgpackHandle
 )
@@ -121,8 +121,8 @@ type MaxAger interface {
 
 // New creates a new HashAuth En/Decoder.
 // key should be a carefully guarded secret, with it anyone could forge a token.
-// opts can be nil, in which case a sha1 hasher, a default cookie name, and no
-// cookie attributes will be used.
+// opts can be nil, in which case a sha256 hasher, a default cookie name, and
+// no cookie attributes will be used.
 func New(key []byte, opts *Options) *HashAuth {
 	if opts == nil {
 		opts = &Options{}
