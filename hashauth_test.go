@@ -552,6 +552,26 @@ func TestExpiresTakesPrecedence(t *testing.T) {
 	}
 }
 
+func TestPinChecksOut(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		token, err := ha.Encode(newSess())
+		if err != nil {
+			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
+		}
+
+		pin, err := ha.Pin(token)
+		if err != nil {
+			t.Fatalf("[%s] Pin failed (%s)", opt.name, err)
+		}
+
+		if !ha.CheckPin(pin, token) {
+			t.Fatalf("[%s] Pin '%s/%s' check failed", opt.name, string(token), pin)
+		}
+	}
+}
+
 type sessionType struct {
 	UserID     int64
 	Expiration time.Time
