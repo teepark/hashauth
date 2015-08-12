@@ -253,7 +253,7 @@ func (ha *HashAuth) Decode(token []byte, container interface{}) error {
 		return ErrInvalid
 	}
 
-	buf := bytes.NewBuffer(token)
+	buf := bytes.NewBuffer(token[:len(token)-ha.hasher().Size()])
 	return decodeKeyless(container, buf)
 }
 
