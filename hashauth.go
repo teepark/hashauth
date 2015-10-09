@@ -425,7 +425,10 @@ func encodeKeyless(w io.Writer, obj interface{}) error {
 	enc := codec.NewEncoder(w, &mh)
 	val := deref(reflect.ValueOf(obj))
 
-	keys := getKeys(val.Type())
+	var keys []string
+	if val.IsValid() && !val.IsNil() {
+		keys = getKeys(val.Type())
+	}
 	if keys == nil {
 		return enc.Encode(obj)
 	}
@@ -444,7 +447,10 @@ func decodeKeyless(dest interface{}, r io.Reader) error {
 	dec := codec.NewDecoder(r, &mh)
 	val := deref(reflect.ValueOf(dest))
 
-	keys := getKeys(val.Type())
+	var keys []string
+	if val.IsValid() && !val.IsNil() {
+		keys = getKeys(val.Type())
+	}
 	if keys == nil {
 		return dec.Decode(dest)
 	}
