@@ -426,7 +426,7 @@ func encodeKeyless(w io.Writer, obj interface{}) error {
 	val := deref(reflect.ValueOf(obj))
 
 	var keys []string
-	if val.IsValid() && !val.IsNil() {
+	if val.IsValid() && (val.Kind() == reflect.Struct || !val.IsNil()) {
 		keys = getKeys(val.Type())
 	}
 	if keys == nil {
@@ -448,7 +448,7 @@ func decodeKeyless(dest interface{}, r io.Reader) error {
 	val := deref(reflect.ValueOf(dest))
 
 	var keys []string
-	if val.IsValid() && !val.IsNil() {
+	if val.IsValid() && (val.Kind() == reflect.Struct || !val.IsNil()) {
 		keys = getKeys(val.Type())
 	}
 	if keys == nil {
