@@ -572,9 +572,88 @@ func TestPinChecksOut(t *testing.T) {
 	}
 }
 
+func TestOldVersion(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		sess := newSess()
+		token, err := ha.Encode(sess)
+		if err != nil {
+			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
+		}
+
+		target := &sessionTypeV1{}
+		if err := ha.Decode(token, target); err != nil {
+			t.Fatalf("[%s] decoding to V1 session failed: %s", opt.name, err)
+		}
+
+		if target.UserID != sess.UserID {
+			t.Fatalf(
+				"[%s] decoding to V1 changed V0 field UserID %q -> %q",
+				opt.name, sess.UserID, target.UserID,
+			)
+		}
+
+		if target.Expiration != sess.Expiration {
+			t.Fatalf(
+				"[%s] decoding to V1 changed V0 field Expiration %q -> %q",
+				opt.name, sess.Expiration, target.Expiration,
+			)
+		}
+
+		if target.Name != "" {
+			t.Fatalf(
+				"[%s] got non-zero value for un-set V1 Name: %q",
+				opt.name, target.Name,
+			)
+		}
+	}
+}
+
+func TestDecodingFromNewerVersion(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		sess := &sessionTypeV1{
+			UserID:     56,
+			Expiration: time.Now().UTC().Add(30 * 24 * time.Hour),
+			Name:       "roger",
+		}
+		token, err := ha.Encode(sess)
+		if err != nil {
+			t.Fatalf("[%s] Encode failed: %s", opt.name, err)
+		}
+
+		target := &sessionType{}
+		if err := ha.Decode(token, target); err != nil {
+			t.Fatalf("[%s] decoding to V0 session failed: %s", opt.name, err)
+		}
+
+		if target.UserID != sess.UserID {
+			t.Fatalf(
+				"[%s] decoding V1 token to V0 change field UserID %q -> %q",
+				opt.name, sess.UserID, target.UserID,
+			)
+		}
+
+		if target.Expiration != sess.Expiration {
+			t.Fatalf(
+				"[%s] decoding V1 token to V0 change field Expiration %q -> %q",
+				opt.name, sess.Expiration, target.Expiration,
+			)
+		}
+	}
+}
+
 type sessionType struct {
 	UserID     int64
 	Expiration time.Time
+}
+
+type sessionTypeV1 struct {
+	UserID     int64
+	Expiration time.Time
+	Name       string `version:"1"`
 }
 
 type expiringSession sessionType

@@ -69,6 +69,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -399,25 +400,59 @@ func deref(val reflect.Value) reflect.Value {
 	return val
 }
 
+type keyDescriptor struct {
+	key     string
+	version int
+}
+
+type keyDescriptors []keyDescriptor
+
+func (kds keyDescriptors) Len() int {
+	return len(kds)
+}
+
+func (kds keyDescriptors) Less(i, j int) bool {
+	if kds[i].version != kds[j].version {
+		return kds[i].version < kds[j].version
+	}
+	return kds[i].key < kds[j].key
+}
+
+func (kds keyDescriptors) Swap(i, j int) {
+	kds[i], kds[j] = kds[j], kds[i]
+}
+
 func getKeys(t reflect.Type) []string {
 	if t.Kind() != reflect.Struct {
 		return nil
 	}
 
 	num := t.NumField()
-	keys := make([]string, num)
-	j := 0
+	kds := make(keyDescriptors, 0, num)
 	for i := 0; i < num; i++ {
-		key := t.Field(i).Name
+		field := t.Field(i)
+		key := field.Name
 		if key[0:1] != strings.ToUpper(key[0:1]) {
 			continue
 		}
-		keys[j] = key
-		j++
-	}
-	keys = keys[:j]
 
-	sort.Strings(keys)
+		var version int
+		v, err := strconv.Atoi(field.Tag.Get("version"))
+		if err == nil {
+			version = v
+		}
+
+		kds = append(kds, keyDescriptor{
+			key:     key,
+			version: version,
+		})
+	}
+	sort.Sort(kds)
+
+	keys := make([]string, len(kds))
+	for i, kd := range kds {
+		keys[i] = kd.key
+	}
 	return keys
 }
 
@@ -458,6 +493,9 @@ func decodeKeyless(dest interface{}, r io.Reader) error {
 	for _, key := range keys {
 		dest = val.FieldByName(key).Addr().Interface()
 		err := dec.Decode(&dest)
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			return err
 		}
