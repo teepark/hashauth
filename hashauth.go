@@ -15,7 +15,6 @@ cookies for sessions.
 Login session example:
 
 	var Signer = hashauth.New([]byte("secret key"), nil)
-	const loginCtx = "login"
 
 	type LoginSession struct {
 		UserID     int
@@ -30,12 +29,9 @@ Login session example:
 	func AuthRequired(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			sess := new(LoginSession)
-			err := Signer.Authenticate(loginCtx, r, sess)
+			err := Signer.Authenticate(r, sess)
 			if err != nil {
 				http.Error(w, "Login Required", http.StatusForbidden)
-			} else if time.Now().UTC().Before(sess.Expiration) {
-				// check the expiration, cookie attributes can be tampered with
-				http.Error(w, "Login Expired", http.StatusForbidden)
 			} else {
 				h.ServeHTTP(w, r)
 			}
@@ -43,7 +39,7 @@ Login session example:
 	}
 
 	func LogUserIn(w http.ResponseWriter, uid int) error {
-		return Signer.SetCookie(loginCtx, w, &LoginSession{
+		return Signer.SetCookie(w, &LoginSession{
 			UserID:     uid,
 			Expiration: time.Now().UTC().Add(7*24*time.Hour),
 		})
@@ -78,8 +74,14 @@ import (
 
 const padChar = '.'
 
-// ErrInvalid is returned when an authentication check fails
-var ErrInvalid = errors.New("hashauth: token validation failed")
+var (
+	// ErrInvalid is returned when an authentication check fails.
+	ErrInvalid = errors.New("hashauth: token validation failed")
+
+	// ErrExpired is returned when an Expirer session indicates that
+	// an authentication token's expiration time has passed.
+	ErrExpired = errors.New("hashauth: expiration time has passed")
+)
 
 var (
 	defaultHasher     = sha256.New
@@ -291,11 +293,24 @@ func (ha *HashAuth) CheckPin(pin string, token []byte) bool {
 //  - http.ErrNoCookie if there is no auth header at all
 //  - a decoding error if it is malformed
 //  - ErrInvalid if there is a properly formatted token that is invalid
+//  - ErrExpired if the session has expired
 func (ha *HashAuth) Authenticate(r *http.Request, container interface{}) error {
 	cookie, err := r.Cookie(ha.cookieName)
 	if err != nil {
 		return err
 	}
+
+	err = ha.Decode([]byte(cookie.Value), container)
+	if err != nil {
+		return err
+	}
+
+	if expirer, ok := container.(Expirer); ok {
+		if expirer.Expires().After(time.Now()) {
+			return ErrExpired
+		}
+	}
+
 	return ha.Decode([]byte(cookie.Value), container)
 }
 
@@ -347,9 +362,9 @@ func augmentCookie(cookie *http.Cookie, session interface{}) {
 		expire = sess.Expires().UTC()
 	}
 	if !expire.IsZero() {
-		//TODO: find out exactly: for which browsers is this necessary?
 		s := expire.Format(time.RFC1123)
 		if strings.HasSuffix(s, "UTC") {
+			//TODO: find out exactly: for which browsers is this necessary?
 			s = s[:len(s)-3] + "GMT"
 		}
 		cookie.RawExpires = s
