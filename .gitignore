@@ -26,3 +26,6 @@ _testmain.go
 # vim droppings
 .s??
 .*.s??
+
+# go-fuzz test program
+hashauth-fuzz.zip
