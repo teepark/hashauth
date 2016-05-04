@@ -162,7 +162,7 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestProducesURLSafeTokens(t *testing.T) {
-	safe := []byte("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ$-_.+!*'()")
+	safe := []byte("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ$-_+!*'()~")
 
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
@@ -572,6 +572,23 @@ func TestPinChecksOut(t *testing.T) {
 	}
 }
 
+func TestCheckPinFailsOnWrongLength(t *testing.T) {
+	ha := New([]byte(signKey), &Options{
+		PINSignKey: []byte("hello"),
+		PINLength:  4,
+	})
+
+	token := []byte("not really a token")
+	pin, err := ha.Pin(token)
+	if err != nil {
+		t.Fatalf("error generating pin code: %s", err)
+	}
+
+	if ha.CheckPin(pin[:len(pin)-1], token) {
+		t.Fatal("Wrong Pin length still validated")
+	}
+}
+
 func TestOldVersion(t *testing.T) {
 	for _, opt := range opts {
 		ha := New([]byte(signKey), opt.opts)
@@ -642,6 +659,87 @@ func TestDecodingFromNewerVersion(t *testing.T) {
 				opt.name, sess.Expiration, target.Expiration,
 			)
 		}
+	}
+}
+
+func TestTokenWithOldPadCharValidates(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		token, err := ha.Encode(newSess())
+		if err != nil {
+			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
+		}
+
+		token = []byte(strings.Replace(string(token), string(padChar), string(oldPadChar), -1))
+
+		if !ha.Validate(token) {
+			t.Fatalf("[%s] Token with oldPadChar doesn't Validate!", opt.name)
+		}
+	}
+}
+
+func TestRoundTripWithOldPadChar(t *testing.T) {
+	for _, opt := range opts {
+		ha := New([]byte(signKey), opt.opts)
+
+		start := newSess()
+
+		var (
+			token []byte
+			err   error
+		)
+
+		token, err = ha.Encode(start)
+		if err != nil {
+			t.Fatalf("[%s] Encode failed (%s)", opt.name, err)
+		}
+
+		token = []byte(strings.Replace(string(token), string(padChar), string(oldPadChar), -1))
+
+		end := new(sessionType)
+		if err := ha.Decode(token, end); err != nil {
+			t.Fatalf("[%s] Encode-produced token doesn't Decode! (%s)", opt.name, err)
+		}
+
+		if !equal(start, end) {
+			t.Fatalf(
+				"[%s] Encode/Decode round trip messed up values (start: %+v, end: %+v)",
+				opt.name,
+				start,
+				end,
+			)
+		}
+	}
+}
+
+func TestPanicsOnBigPin(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("panic expected, didn't occur")
+		}
+	}()
+
+	New(nil, &Options{PINLength: 19})
+}
+
+func TestExpiredTokenProducesErrExpired(t *testing.T) {
+	ha := New([]byte(signKey), nil)
+
+	sess := &expiringSession{
+		UserID:     14,
+		Expiration: time.Now().Add(-1 * time.Second),
+	}
+
+	token, err := ha.Encode(sess)
+	if err != nil {
+		t.Fatalf("error encoding session: %s", err)
+	}
+
+	sess = new(expiringSession)
+	if err := ha.Decode(token, sess); err != ErrExpired {
+		t.Fatalf("expired token didn't produce ErrExpired but: %s", err)
 	}
 }
 

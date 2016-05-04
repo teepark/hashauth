@@ -72,7 +72,10 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-const padChar = '.'
+const (
+	oldPadChar = '.'
+	padChar    = '~'
+)
 
 var (
 	// ErrInvalid is returned when an authentication check fails.
@@ -245,7 +248,9 @@ func (ha *HashAuth) validate(token []byte) bool {
 }
 
 // Decode checks a token's validity and extracts the data encoded in it.
-// May return ErrInvalid if the validity check fails.
+// May return ErrInvalid if the validity check fails. If the container
+// is an Expirer and the token contains an expired session, it will
+// return ErrExpired but still populate the container with token data.
 func (ha *HashAuth) Decode(token []byte, container interface{}) error {
 	token, err := b64decode(token)
 	if err != nil {
@@ -257,7 +262,16 @@ func (ha *HashAuth) Decode(token []byte, container interface{}) error {
 	}
 
 	buf := bytes.NewBuffer(token[:len(token)-ha.hasher().Size()])
-	return decodeKeyless(container, buf)
+	if err := decodeKeyless(container, buf); err != nil {
+		return err
+	}
+
+	if expirer, ok := container.(Expirer); ok {
+		if expirer.Expires().Before(time.Now()) {
+			return ErrExpired
+		}
+	}
+	return nil
 }
 
 // Pin generates a PIN code (string of a decimal number) from a token.
@@ -298,17 +312,6 @@ func (ha *HashAuth) Authenticate(r *http.Request, container interface{}) error {
 	cookie, err := r.Cookie(ha.cookieName)
 	if err != nil {
 		return err
-	}
-
-	err = ha.Decode([]byte(cookie.Value), container)
-	if err != nil {
-		return err
-	}
-
-	if expirer, ok := container.(Expirer); ok {
-		if expirer.Expires().After(time.Now()) {
-			return ErrExpired
-		}
 	}
 
 	return ha.Decode([]byte(cookie.Value), container)
@@ -396,7 +399,11 @@ func b64encode(plain []byte) []byte {
 func b64decode(enc []byte) ([]byte, error) {
 	plain := make([]byte, base64.URLEncoding.DecodedLen(len(enc)))
 
-	enc = bytes.Replace(enc, []byte{padChar}, []byte{'='}, -1)
+	var padder byte = padChar
+	if enc[len(enc)-1] == oldPadChar {
+		padder = oldPadChar
+	}
+	enc = bytes.Replace(enc, []byte{padder}, []byte{'='}, -1)
 
 	n, err := base64.URLEncoding.Decode(plain, enc)
 	if err != nil {
